@@ -15,7 +15,11 @@ import subprocess
 import uuid
 
 from swe_af.reasoners import router
-from swe_af.reasoners.pipeline import _assign_sequence_numbers, _compute_levels, _validate_file_conflicts
+from swe_af.reasoners.pipeline import (
+    _assign_sequence_numbers,
+    _compute_levels,
+    _validate_file_conflicts,
+)
 from swe_af.reasoners.schemas import PlanResult, ReviewResult
 
 from agentfield import Agent
@@ -29,7 +33,9 @@ app = Agent(
     description="Autonomous SWE planning pipeline",
     agentfield_server=os.getenv("AGENTFIELD_SERVER", "http://localhost:8080"),
     api_key=os.getenv("AGENTFIELD_API_KEY"),
+    enable_did=False,
 )
+app.agentfield_connected = True  # Trust Go control plane registration
 
 app.include_router(router)
 
@@ -88,8 +94,13 @@ async def build(
         )
         if clone_result.returncode != 0:
             err = clone_result.stderr.strip()
-            app.note(f"Clone failed (exit {clone_result.returncode}): {err}", tags=["build", "clone", "error"])
-            raise RuntimeError(f"git clone failed (exit {clone_result.returncode}): {err}")
+            app.note(
+                f"Clone failed (exit {clone_result.returncode}): {err}",
+                tags=["build", "clone", "error"],
+            )
+            raise RuntimeError(
+                f"git clone failed (exit {clone_result.returncode}): {err}"
+            )
     elif cfg.repo_url and os.path.exists(git_dir):
         # Repo already cloned by a prior build — reset to remote default branch
         # so git_init creates the integration branch from a clean baseline.
@@ -103,28 +114,40 @@ async def build(
         worktrees_dir = os.path.join(repo_path, ".worktrees")
         if os.path.isdir(worktrees_dir):
             import shutil
+
             shutil.rmtree(worktrees_dir, ignore_errors=True)
         subprocess.run(
             ["git", "worktree", "prune"],
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
 
         # Fetch latest remote state
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
         if fetch.returncode != 0:
-            app.note(f"git fetch failed: {fetch.stderr.strip()}", tags=["build", "clone", "error"])
+            app.note(
+                f"git fetch failed: {fetch.stderr.strip()}",
+                tags=["build", "clone", "error"],
+            )
 
         # Force-checkout default branch (handles dirty working tree from crashed builds)
         subprocess.run(
             ["git", "checkout", "-f", default_branch],
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
         reset = subprocess.run(
             ["git", "reset", "--hard", f"origin/{default_branch}"],
-            cwd=repo_path, capture_output=True, text=True,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
         )
         if reset.returncode != 0:
             # Hard reset failed — nuke and re-clone as last resort
@@ -133,11 +156,13 @@ async def build(
                 tags=["build", "clone", "reclone"],
             )
             import shutil
+
             shutil.rmtree(repo_path, ignore_errors=True)
             os.makedirs(repo_path, exist_ok=True)
             clone_result = subprocess.run(
                 ["git", "clone", cfg.repo_url, repo_path],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if clone_result.returncode != 0:
                 err = clone_result.stderr.strip()
@@ -222,7 +247,11 @@ async def build(
         try:
             git_init = _unwrap(raw_git, "run_git_init")
         except RuntimeError:
-            git_init = raw_git if isinstance(raw_git, dict) else {"success": False, "error_message": str(raw_git)}
+            git_init = (
+                raw_git
+                if isinstance(raw_git, dict)
+                else {"success": False, "error_message": str(raw_git)}
+            )
 
         if git_init.get("success"):
             app.note(
@@ -275,44 +304,54 @@ async def build(
     # 2. EXECUTE
     exec_config = cfg.to_execution_config_dict()
 
-    dag_result = _unwrap(await app.call(
-        f"{NODE_ID}.execute",
-        plan_result=plan_result,
-        repo_path=repo_path,
-        execute_fn_target=cfg.execute_fn_target,
-        config=exec_config,
-        git_config=git_config,
-        build_id=build_id,
-    ), "execute")
+    dag_result = _unwrap(
+        await app.call(
+            f"{NODE_ID}.execute",
+            plan_result=plan_result,
+            repo_path=repo_path,
+            execute_fn_target=cfg.execute_fn_target,
+            config=exec_config,
+            git_config=git_config,
+            build_id=build_id,
+        ),
+        "execute",
+    )
 
     # 3. VERIFY
     verification = None
     for cycle in range(cfg.max_verify_fix_cycles + 1):
         app.note(f"Verification cycle {cycle}", tags=["build", "verify"])
-        verification = _unwrap(await app.call(
-            f"{NODE_ID}.run_verifier",
-            prd=plan_result["prd"],
-            repo_path=repo_path,
-            artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
-            completed_issues=[r for r in dag_result.get("completed_issues", [])],
-            failed_issues=[r for r in dag_result.get("failed_issues", [])],
-            skipped_issues=dag_result.get("skipped_issues", []),
-            model=resolved["verifier_model"],
-            permission_mode=cfg.permission_mode,
-            ai_provider=cfg.ai_provider,
-        ), "run_verifier")
+        verification = _unwrap(
+            await app.call(
+                f"{NODE_ID}.run_verifier",
+                prd=plan_result["prd"],
+                repo_path=repo_path,
+                artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
+                completed_issues=[r for r in dag_result.get("completed_issues", [])],
+                failed_issues=[r for r in dag_result.get("failed_issues", [])],
+                skipped_issues=dag_result.get("skipped_issues", []),
+                model=resolved["verifier_model"],
+                permission_mode=cfg.permission_mode,
+                ai_provider=cfg.ai_provider,
+            ),
+            "run_verifier",
+        )
 
         if verification.get("passed", False) or cycle >= cfg.max_verify_fix_cycles:
             break
 
         # Verification failed — generate targeted fix issues
         failed_criteria = [
-            c for c in verification.get("criteria_results", [])
+            c
+            for c in verification.get("criteria_results", [])
             if not c.get("passed", True)
         ]
 
         if not failed_criteria:
-            app.note("Verification failed but no specific criteria failures found", tags=["build", "verify"])
+            app.note(
+                "Verification failed but no specific criteria failures found",
+                tags=["build", "verify"],
+            )
             break
 
         app.note(
@@ -322,28 +361,33 @@ async def build(
         )
 
         # Generate fix issues from failed criteria
-        fix_result = _unwrap(await app.call(
-            f"{NODE_ID}.generate_fix_issues",
-            failed_criteria=failed_criteria,
-            dag_state=dag_result,
-            prd=plan_result["prd"],
-            artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
-            model=resolved["verifier_model"],
-            permission_mode=cfg.permission_mode,
-            ai_provider=cfg.ai_provider,
-        ), "generate_fix_issues")
+        fix_result = _unwrap(
+            await app.call(
+                f"{NODE_ID}.generate_fix_issues",
+                failed_criteria=failed_criteria,
+                dag_state=dag_result,
+                prd=plan_result["prd"],
+                artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
+                model=resolved["verifier_model"],
+                permission_mode=cfg.permission_mode,
+                ai_provider=cfg.ai_provider,
+            ),
+            "generate_fix_issues",
+        )
 
         fix_issues = fix_result.get("fix_issues", [])
         fix_debt = fix_result.get("debt_items", [])
 
         # Record unfixable criteria as debt
         for debt in fix_debt:
-            dag_result.setdefault("accumulated_debt", []).append({
-                "type": "unmet_acceptance_criterion",
-                "criterion": debt.get("criterion", ""),
-                "reason": debt.get("reason", ""),
-                "severity": debt.get("severity", "high"),
-            })
+            dag_result.setdefault("accumulated_debt", []).append(
+                {
+                    "type": "unmet_acceptance_criterion",
+                    "criterion": debt.get("criterion", ""),
+                    "reason": debt.get("reason", ""),
+                    "severity": debt.get("severity", "high"),
+                }
+            )
 
         if fix_issues:
             # Build a mini plan from fix issues and execute them
@@ -352,21 +396,29 @@ async def build(
                 "architecture": plan_result.get("architecture", {}),
                 "review": plan_result.get("review", {}),
                 "issues": fix_issues,
-                "levels": [[fi.get("name", f"fix-{i}") for i, fi in enumerate(fix_issues)]],
+                "levels": [
+                    [fi.get("name", f"fix-{i}") for i, fi in enumerate(fix_issues)]
+                ],
                 "file_conflicts": [],
                 "artifacts_dir": plan_result.get("artifacts_dir", artifacts_dir),
                 "rationale": f"Fix issues for verification cycle {cycle + 1}",
             }
-            dag_result = _unwrap(await app.call(
-                f"{NODE_ID}.execute",
-                plan_result=fix_plan,
-                repo_path=repo_path,
-                config=exec_config,
-                git_config=git_config,
-            ), "execute_fixes")
+            dag_result = _unwrap(
+                await app.call(
+                    f"{NODE_ID}.execute",
+                    plan_result=fix_plan,
+                    repo_path=repo_path,
+                    config=exec_config,
+                    git_config=git_config,
+                ),
+                "execute_fixes",
+            )
             continue  # Re-verify
         else:
-            app.note("No fixable issues generated — accepting with debt", tags=["build", "verify"])
+            app.note(
+                "No fixable issues generated — accepting with debt",
+                tags=["build", "verify"],
+            )
             break
 
     success = verification.get("passed", False) if verification else False
@@ -380,12 +432,13 @@ async def build(
     )
 
     # Capture plan docs before finalize cleans up .artifacts/
-    _plan_dir = os.path.join(
-        plan_result.get("artifacts_dir", ""), "plan"
-    )
+    _plan_dir = os.path.join(plan_result.get("artifacts_dir", ""), "plan")
     prd_markdown = ""
     architecture_markdown = ""
-    for _name, _var in [("prd.md", "prd_markdown"), ("architecture.md", "architecture_markdown")]:
+    for _name, _var in [
+        ("prd.md", "prd_markdown"),
+        ("architecture.md", "architecture_markdown"),
+    ]:
         _fpath = os.path.join(_plan_dir, _name)
         if os.path.isfile(_fpath):
             try:
@@ -400,14 +453,17 @@ async def build(
     # 3b. FINALIZE — clean up repo artifacts before PR
     app.note("Phase 3b: Repo finalization", tags=["build", "finalize"])
     try:
-        finalize_result = _unwrap(await app.call(
-            f"{NODE_ID}.run_repo_finalize",
-            repo_path=repo_path,
-            artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
-            model=resolved["git_model"],
-            permission_mode=cfg.permission_mode,
-            ai_provider=cfg.ai_provider,
-        ), "run_repo_finalize")
+        finalize_result = _unwrap(
+            await app.call(
+                f"{NODE_ID}.run_repo_finalize",
+                repo_path=repo_path,
+                artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
+                model=resolved["git_model"],
+                permission_mode=cfg.permission_mode,
+                ai_provider=cfg.ai_provider,
+            ),
+            "run_repo_finalize",
+        )
         if finalize_result.get("success"):
             app.note(
                 f"Repo finalized: {finalize_result.get('summary', '')}",
@@ -436,43 +492,62 @@ async def build(
         )
         build_summary = (
             f"{'Success' if success else 'Partial'}: {completed}/{total} issues completed"
-            + (f", verification: {verification.get('summary', '')}" if verification else "")
+            + (
+                f", verification: {verification.get('summary', '')}"
+                if verification
+                else ""
+            )
         )
         try:
-            pr_result = _unwrap(await app.call(
-                f"{NODE_ID}.run_github_pr",
-                repo_path=repo_path,
-                integration_branch=git_config["integration_branch"],
-                base_branch=base_branch,
-                goal=goal,
-                build_summary=build_summary,
-                completed_issues=dag_result.get("completed_issues", []),
-                accumulated_debt=dag_result.get("accumulated_debt", []),
-                artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
-                model=resolved["git_model"],
-                permission_mode=cfg.permission_mode,
-                ai_provider=cfg.ai_provider,
-            ), "run_github_pr")
+            pr_result = _unwrap(
+                await app.call(
+                    f"{NODE_ID}.run_github_pr",
+                    repo_path=repo_path,
+                    integration_branch=git_config["integration_branch"],
+                    base_branch=base_branch,
+                    goal=goal,
+                    build_summary=build_summary,
+                    completed_issues=dag_result.get("completed_issues", []),
+                    accumulated_debt=dag_result.get("accumulated_debt", []),
+                    artifacts_dir=plan_result.get("artifacts_dir", artifacts_dir),
+                    model=resolved["git_model"],
+                    permission_mode=cfg.permission_mode,
+                    ai_provider=cfg.ai_provider,
+                ),
+                "run_github_pr",
+            )
             pr_url = pr_result.get("pr_url", "")
             if pr_url:
-                app.note(f"Draft PR created: {pr_url}", tags=["build", "github_pr", "complete"])
+                app.note(
+                    f"Draft PR created: {pr_url}",
+                    tags=["build", "github_pr", "complete"],
+                )
 
                 # Programmatically append plan docs to PR body
                 if prd_markdown or architecture_markdown:
                     try:
                         current_body = subprocess.run(
-                            ["gh", "pr", "view", str(pr_result.get("pr_number", 0)),
-                             "--json", "body", "--jq", ".body"],
-                            cwd=repo_path, capture_output=True, text=True, check=True,
+                            [
+                                "gh",
+                                "pr",
+                                "view",
+                                str(pr_result.get("pr_number", 0)),
+                                "--json",
+                                "body",
+                                "--jq",
+                                ".body",
+                            ],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True,
+                            check=True,
                         ).stdout.strip()
 
                         plan_sections = "\n\n---\n"
                         if prd_markdown:
                             plan_sections += (
                                 "\n<details><summary>📋 PRD (Product Requirements Document)"
-                                "</summary>\n\n"
-                                + prd_markdown
-                                + "\n\n</details>\n"
+                                "</summary>\n\n" + prd_markdown + "\n\n</details>\n"
                             )
                         if architecture_markdown:
                             plan_sections += (
@@ -484,9 +559,18 @@ async def build(
                         new_body = current_body + plan_sections
 
                         subprocess.run(
-                            ["gh", "pr", "edit", str(pr_result.get("pr_number", 0)),
-                             "--body", new_body],
-                            cwd=repo_path, capture_output=True, text=True, check=True,
+                            [
+                                "gh",
+                                "pr",
+                                "edit",
+                                str(pr_result.get("pr_number", 0)),
+                                "--body",
+                                new_body,
+                            ],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True,
+                            check=True,
                         )
                         app.note(
                             "Plan docs appended to PR body",
@@ -511,7 +595,9 @@ async def build(
         verification=verification,
         success=success,
         summary=f"{'Success' if success else 'Partial'}: {completed}/{total} issues completed"
-                + (f", verification: {verification.get('summary', '')}" if verification else ""),
+        + (
+            f", verification: {verification.get('summary', '')}" if verification else ""
+        ),
         pr_url=pr_url,
     ).model_dump()
 
@@ -523,13 +609,13 @@ async def plan(
     artifacts_dir: str = ".artifacts",
     additional_context: str = "",
     max_review_iterations: int = 2,
-    pm_model: str = "sonnet",
-    architect_model: str = "sonnet",
-    tech_lead_model: str = "sonnet",
-    sprint_planner_model: str = "sonnet",
-    issue_writer_model: str = "sonnet",
+    pm_model: str = "zhipuai-coding-plan/glm-5",
+    architect_model: str = "zhipuai-coding-plan/glm-5",
+    tech_lead_model: str = "zhipuai-coding-plan/glm-5",
+    sprint_planner_model: str = "zhipuai-coding-plan/glm-5",
+    issue_writer_model: str = "zhipuai-coding-plan/glm-5",
     permission_mode: str = "",
-    ai_provider: str = "claude",
+    ai_provider: str = "opencode",
 ) -> dict:
     """Run the full planning pipeline.
 
@@ -539,57 +625,71 @@ async def plan(
 
     # 1. PM scopes the goal into a PRD
     app.note("Phase 1: Product Manager", tags=["pipeline", "pm"])
-    prd = _unwrap(await app.call(
-        f"{NODE_ID}.run_product_manager",
-        goal=goal,
-        repo_path=repo_path,
-        artifacts_dir=artifacts_dir,
-        additional_context=additional_context,
-        model=pm_model,
-        permission_mode=permission_mode,
-        ai_provider=ai_provider,
-    ), "run_product_manager")
+    prd = _unwrap(
+        await app.call(
+            f"{NODE_ID}.run_product_manager",
+            goal=goal,
+            repo_path=repo_path,
+            artifacts_dir=artifacts_dir,
+            additional_context=additional_context,
+            model=pm_model,
+            permission_mode=permission_mode,
+            ai_provider=ai_provider,
+        ),
+        "run_product_manager",
+    )
 
     # 2. Architect designs the solution
     app.note("Phase 2: Architect", tags=["pipeline", "architect"])
-    arch = _unwrap(await app.call(
-        f"{NODE_ID}.run_architect",
-        prd=prd,
-        repo_path=repo_path,
-        artifacts_dir=artifacts_dir,
-        model=architect_model,
-        permission_mode=permission_mode,
-        ai_provider=ai_provider,
-    ), "run_architect")
+    arch = _unwrap(
+        await app.call(
+            f"{NODE_ID}.run_architect",
+            prd=prd,
+            repo_path=repo_path,
+            artifacts_dir=artifacts_dir,
+            model=architect_model,
+            permission_mode=permission_mode,
+            ai_provider=ai_provider,
+        ),
+        "run_architect",
+    )
 
     # 3. Tech Lead review loop
     review = None
     for i in range(max_review_iterations + 1):
-        app.note(f"Phase 3: Tech Lead review (iteration {i})", tags=["pipeline", "tech_lead"])
-        review = _unwrap(await app.call(
-            f"{NODE_ID}.run_tech_lead",
-            prd=prd,
-            repo_path=repo_path,
-            artifacts_dir=artifacts_dir,
-            revision_number=i,
-            model=tech_lead_model,
-            permission_mode=permission_mode,
-            ai_provider=ai_provider,
-        ), "run_tech_lead")
+        app.note(
+            f"Phase 3: Tech Lead review (iteration {i})", tags=["pipeline", "tech_lead"]
+        )
+        review = _unwrap(
+            await app.call(
+                f"{NODE_ID}.run_tech_lead",
+                prd=prd,
+                repo_path=repo_path,
+                artifacts_dir=artifacts_dir,
+                revision_number=i,
+                model=tech_lead_model,
+                permission_mode=permission_mode,
+                ai_provider=ai_provider,
+            ),
+            "run_tech_lead",
+        )
         if review["approved"]:
             break
         if i < max_review_iterations:
             app.note(f"Architecture revision {i + 1}", tags=["pipeline", "revision"])
-            arch = _unwrap(await app.call(
-                f"{NODE_ID}.run_architect",
-                prd=prd,
-                repo_path=repo_path,
-                artifacts_dir=artifacts_dir,
-                feedback=review["feedback"],
-                model=architect_model,
-                permission_mode=permission_mode,
-                ai_provider=ai_provider,
-            ), "run_architect (revision)")
+            arch = _unwrap(
+                await app.call(
+                    f"{NODE_ID}.run_architect",
+                    prd=prd,
+                    repo_path=repo_path,
+                    artifacts_dir=artifacts_dir,
+                    feedback=review["feedback"],
+                    model=architect_model,
+                    permission_mode=permission_mode,
+                    ai_provider=ai_provider,
+                ),
+                "run_architect (revision)",
+            )
 
     # Force-approve if we exhausted iterations
     assert review is not None
@@ -604,16 +704,19 @@ async def plan(
 
     # 4. Sprint planner decomposes into issues
     app.note("Phase 4: Sprint Planner", tags=["pipeline", "sprint_planner"])
-    sprint_result = _unwrap(await app.call(
-        f"{NODE_ID}.run_sprint_planner",
-        prd=prd,
-        architecture=arch,
-        repo_path=repo_path,
-        artifacts_dir=artifacts_dir,
-        model=sprint_planner_model,
-        permission_mode=permission_mode,
-        ai_provider=ai_provider,
-    ), "run_sprint_planner")
+    sprint_result = _unwrap(
+        await app.call(
+            f"{NODE_ID}.run_sprint_planner",
+            prd=prd,
+            architecture=arch,
+            repo_path=repo_path,
+            artifacts_dir=artifacts_dir,
+            model=sprint_planner_model,
+            permission_mode=permission_mode,
+            ai_provider=ai_provider,
+        ),
+        "run_sprint_planner",
+    )
     issues = sprint_result["issues"]
     rationale = sprint_result["rationale"]
 
@@ -632,7 +735,9 @@ async def plan(
     prd_summary_str = prd.get("validated_description", "")
     prd_ac = prd.get("acceptance_criteria", [])
     if prd_ac:
-        prd_summary_str += "\n\nAcceptance Criteria:\n" + "\n".join(f"- {c}" for c in prd_ac)
+        prd_summary_str += "\n\nAcceptance Criteria:\n" + "\n".join(
+            f"- {c}" for c in prd_ac
+        )
 
     app.note(
         f"Phase 4b: Writing {len(issues)} issue files in parallel",
@@ -641,26 +746,35 @@ async def plan(
     writer_tasks = []
     for issue in issues:
         siblings = [
-            {"name": i["name"], "title": i.get("title", ""), "provides": i.get("provides", [])}
-            for i in issues if i["name"] != issue["name"]
+            {
+                "name": i["name"],
+                "title": i.get("title", ""),
+                "provides": i.get("provides", []),
+            }
+            for i in issues
+            if i["name"] != issue["name"]
         ]
-        writer_tasks.append(app.call(
-            f"{NODE_ID}.run_issue_writer",
-            issue=issue,
-            prd_summary=prd_summary_str,
-            architecture_summary=arch.get("summary", ""),
-            issues_dir=issues_dir,
-            repo_path=repo_path,
-            prd_path=prd_path,
-            architecture_path=architecture_path,
-            sibling_issues=siblings,
-            model=issue_writer_model,
-            permission_mode=permission_mode,
-            ai_provider=ai_provider,
-        ))
+        writer_tasks.append(
+            app.call(
+                f"{NODE_ID}.run_issue_writer",
+                issue=issue,
+                prd_summary=prd_summary_str,
+                architecture_summary=arch.get("summary", ""),
+                issues_dir=issues_dir,
+                repo_path=repo_path,
+                prd_path=prd_path,
+                architecture_path=architecture_path,
+                sibling_issues=siblings,
+                model=issue_writer_model,
+                permission_mode=permission_mode,
+                ai_provider=ai_provider,
+            )
+        )
     writer_results = await asyncio.gather(*writer_tasks, return_exceptions=True)
 
-    succeeded = sum(1 for r in writer_results if isinstance(r, dict) and r.get("success"))
+    succeeded = sum(
+        1 for r in writer_results if isinstance(r, dict) and r.get("success")
+    )
     failed = len(writer_results) - succeeded
     app.note(
         f"Issue writers complete: {succeeded} succeeded, {failed} failed",
@@ -712,7 +826,9 @@ async def execute(
     from swe_af.execution.schemas import ExecutionConfig
 
     effective_config = dict(config) if config else {}
-    exec_config = ExecutionConfig(**effective_config) if effective_config else ExecutionConfig()
+    exec_config = (
+        ExecutionConfig(**effective_config) if effective_config else ExecutionConfig()
+    )
 
     if execute_fn_target:
         # External coder agent (existing path)
@@ -759,9 +875,7 @@ async def resume_build(
     # Reconstruct plan_result from saved artifacts
     plan_path = os.path.join(base, "execution", "checkpoint.json")
     if not os.path.exists(plan_path):
-        raise RuntimeError(
-            f"No checkpoint found at {plan_path}. Cannot resume."
-        )
+        raise RuntimeError(f"No checkpoint found at {plan_path}. Cannot resume.")
 
     # Load the original plan artifacts to reconstruct plan_result
     prd_path = os.path.join(base, "plan", "prd.md")
