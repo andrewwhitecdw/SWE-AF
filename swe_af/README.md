@@ -2,6 +2,24 @@
 
 Command-line interface for triggering builds, checking status, and managing SWE-AF workflows via the AgentField control plane.
 
+## Quick Start
+
+**Terminal 1 - Start AgentField control plane:**
+```bash
+cd ~/code/agentfield/control-plane && go run ./cmd/agentfield-server
+```
+
+**Terminal 2 - Start SWE-AF agent:**
+```bash
+cd ~/code/SWE-AF && swe-af
+```
+
+**Terminal 3 - Use the CLI:**
+```bash
+swe agents                    # Verify swe-planner is registered
+swe build "Add feature" --path ./my-project --poll
+```
+
 ## Installation
 
 ```bash
