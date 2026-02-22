@@ -449,6 +449,79 @@ Requirements:
 - `GH_TOKEN` in `.env` with `repo` scope
 - Repo access for that token
 
+## CLI Reference
+
+SWE-AF includes a CLI client for triggering builds and managing workflows from the command line.
+
+### Installation
+
+The `swe` CLI is installed automatically with the package:
+
+```bash
+pip install -e ".[dev]"
+swe --help
+```
+
+### Commands
+
+```bash
+# Trigger a full build
+swe build "Add JWT auth" --path ./my-project
+
+# Build with model overrides
+swe build "Refactor API" --path ./my-project \
+  --model default=sonnet \
+  --model coder=opus \
+  --learning
+
+# Plan only (no execution)
+swe plan "Add authentication system" --path ./my-project
+
+# Execute a prebuilt plan
+swe execute ./my-project --poll
+
+# Check build status
+swe status <execution_id>
+
+# Poll until complete
+swe status <execution_id> --poll
+
+# Resume a crashed build
+swe resume ./my-project
+
+# Cancel a running build
+swe cancel <execution_id>
+
+# List recent executions
+swe list
+
+# View build logs
+swe logs ./my-project
+
+# Call a specific agent directly
+swe call run_coder '{"issue": {...}, "repo_path": "/path/to/repo"}'
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--path`, `-p` | Repository path (default: current directory) |
+| `--url`, `-u` | Git URL to clone (alternative to --path) |
+| `--runtime`, `-r` | Model runtime: `claude_code` or `open_code` |
+| `--model`, `-m` | Model mapping: `--model coder=opus` |
+| `--learning` | Enable continual learning across issues |
+| `--poll` | Poll until execution completes |
+| `--server`, `-s` | AgentField server URL (default: `http://localhost:8080`) |
+| `--json`, `-j` | Output raw JSON |
+
+### Environment Variables
+
+```bash
+# Control plane URL (default: http://localhost:8080)
+export AGENTFIELD_SERVER="http://localhost:8080"
+```
+
 ## API Reference
 
 <details>
