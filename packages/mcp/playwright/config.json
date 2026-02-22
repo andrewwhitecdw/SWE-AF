@@ -1,0 +1,5 @@
+{
+  "alias": "playwright",
+  "run": "npx @playwright/mcp@latest",
+  "description": "Browser automation for testing and screenshots"
+}

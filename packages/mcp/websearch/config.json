@@ -1,0 +1,5 @@
+{
+  "alias": "websearch",
+  "run": "npx -y @anthropic-ai/mcp-client-cli https://mcp.exa.ai/mcp?tools=web_search_exa",
+  "description": "Web search via Exa for current information and docs"
+}

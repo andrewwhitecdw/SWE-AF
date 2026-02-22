@@ -1,0 +1,5 @@
+{
+  "alias": "backlog",
+  "run": "npx -y @anthropic-ai/backlog-md-mcp",
+  "description": "Backlog.md task management"
+}

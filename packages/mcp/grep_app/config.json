@@ -1,0 +1,5 @@
+{
+  "alias": "grep_app",
+  "run": "npx -y @anthropic-ai/mcp-client-cli https://mcp.grep.app",
+  "description": "GitHub code search for real-world examples"
+}

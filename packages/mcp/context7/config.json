@@ -1,0 +1,5 @@
+{
+  "alias": "context7",
+  "run": "npx -y @anthropic-ai/mcp-client-cli https://mcp.context7.com/mcp",
+  "description": "Library documentation search for API docs and guides"
+}

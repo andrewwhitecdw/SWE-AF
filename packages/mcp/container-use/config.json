@@ -1,0 +1,5 @@
+{
+  "alias": "container-use",
+  "run": "/home/andrewh/.local/bin/container-use stdio",
+  "description": "Container environment management for isolated builds"
+}

@@ -34,6 +34,8 @@ app = Agent(
     agentfield_server=os.getenv("AGENTFIELD_SERVER", "http://localhost:8080"),
     api_key=os.getenv("AGENTFIELD_API_KEY"),
     enable_did=False,
+    enable_mcp=True,
+    dev_mode=True,
 )
 app.agentfield_connected = True  # Trust Go control plane registration
 
@@ -913,6 +915,22 @@ async def resume_build(
 
 def main():
     """Entry point for ``python -m swe_af`` and the ``swe-af`` console script."""
+    import asyncio
+    
+    async def start_mcp():
+        if app.mcp_manager:
+            discovered = app.mcp_manager.discover_mcp_servers()
+            if discovered:
+                results = await app.mcp_manager.start_all_servers(discovered)
+                print(f"MCP servers: {results}")
+                return results
+        return {}
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    mcp_results = loop.run_until_complete(start_mcp())
+    print(f"Started {len([v for v in mcp_results.values() if v])} MCP servers")
+    
     app.run(port=8003, host="0.0.0.0")
 
 
