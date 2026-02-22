@@ -1,0 +1,51 @@
+{
+  "$schema": "http://opencode.ai/config.json",
+  "description": "OpenCode configuration for SWE-AF agents",
+  
+  "model": "zhipuai-coding-plan/glm-5",
+  "provider": "opencode",
+  
+  "mcp": {
+    "websearch": {
+      "type": "remote",
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa",
+      "enabled": true
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    },
+    "grep_app": {
+      "type": "remote",
+      "url": "https://mcp.grep.app",
+      "enabled": true
+    },
+    "container-use": {
+      "type": "local",
+      "command": ["/home/andrewh/.local/bin/container-use", "stdio"],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest"],
+      "enabled": true
+    },
+    "backlog": {
+      "type": "local",
+      "command": ["npx", "-y", "@anthropic-ai/backlog-md-mcp"],
+      "enabled": true
+    }
+  },
+  
+  "plugins": [
+    "opencode-mem@latest",
+    "opencode-sessions@latest"
+  ],
+  
+  "settings": {
+    "maxTurns": 150,
+    "permissionMode": "auto",
+    "outputFormat": "json"
+  }
+}
