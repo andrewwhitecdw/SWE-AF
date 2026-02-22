@@ -172,10 +172,15 @@ curl -X POST https://<control-plane>.up.railway.app/api/v1/execute/async/swe-pla
 ### 2. Install
 
 ```bash
+pipx install -e ".[dev]"
+```
+
+Or with pip:
+
+```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+pip install -e ".[dev]"
 ```
 
 ### 3. Run
@@ -455,7 +460,12 @@ SWE-AF includes a CLI client for triggering builds and managing workflows from t
 
 ### Installation
 
-The `swe` CLI is installed automatically with the package:
+```bash
+pipx install -e ".[dev]"
+swe --help
+```
+
+Or with pip:
 
 ```bash
 pip install -e ".[dev]"
