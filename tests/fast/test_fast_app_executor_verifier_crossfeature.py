@@ -367,10 +367,10 @@ class TestExecutorLazyImportNodeIdRouting:
 
 
 class TestVerifierCallArgForwarding:
-    """fast_verify must forward all required kwargs to app.call."""
+    """fast_verify must adapt task_results and forward kwargs to app.call."""
 
-    def test_all_six_required_kwargs_forwarded(self) -> None:
-        """All 6 required parameters must appear in the kwargs sent to app.call."""
+    def test_all_required_kwargs_forwarded(self) -> None:
+        """All required parameters must appear in the kwargs sent to app.call."""
         verify_response = {
             "passed": True,
             "summary": "all good",
@@ -378,6 +378,7 @@ class TestVerifierCallArgForwarding:
             "suggested_fixes": [],
         }
         mock_app = MagicMock()
+        mock_app.NODE_ID = "swe-fast"
         mock_app.app.call = AsyncMock(return_value=verify_response)
 
         with patch.dict("sys.modules", {"swe_af.fast.app": mock_app}):
@@ -396,8 +397,9 @@ class TestVerifierCallArgForwarding:
         assert mock_app.app.call.called, "app.call must be invoked"
         call_kwargs = mock_app.app.call.call_args.kwargs
         required_kwargs = {
-            "prd", "repo_path", "task_results",
-            "verifier_model", "permission_mode", "ai_provider", "artifacts_dir",
+            "prd", "repo_path", "artifacts_dir",
+            "completed_issues", "failed_issues", "skipped_issues",
+            "model", "permission_mode", "ai_provider",
         }
         missing = required_kwargs - set(call_kwargs.keys())
         assert not missing, (
@@ -405,10 +407,11 @@ class TestVerifierCallArgForwarding:
             f"missing: {missing}"
         )
 
-    def test_first_positional_arg_is_run_verifier(self) -> None:
-        """The first positional arg to app.call must be 'run_verifier'."""
+    def test_first_positional_arg_is_qualified_run_verifier(self) -> None:
+        """The first positional arg to app.call must be '{NODE_ID}.run_verifier'."""
         verify_response = {"passed": False, "summary": "", "criteria_results": [], "suggested_fixes": []}
         mock_app = MagicMock()
+        mock_app.NODE_ID = "swe-fast"
         mock_app.app.call = AsyncMock(return_value=verify_response)
 
         with patch.dict("sys.modules", {"swe_af.fast.app": mock_app}):
@@ -426,21 +429,21 @@ class TestVerifierCallArgForwarding:
 
         call_args = mock_app.app.call.call_args
         first_arg = call_args.args[0] if call_args.args else None
-        assert first_arg == "run_verifier", (
-            f"fast_verify must call app.call('run_verifier', ...), "
+        assert first_arg == "swe-fast.run_verifier", (
+            f"fast_verify must call app.call('swe-fast.run_verifier', ...), "
             f"got first arg: {first_arg!r}"
         )
 
-    def test_task_results_forwarded_correctly(self) -> None:
-        """Executor-produced task_results must be forwarded to run_verifier unchanged."""
+    def test_task_results_adapted_to_completed_failed_skipped(self) -> None:
+        """Executor-produced task_results must be adapted to run_verifier's issue lists."""
         from swe_af.fast.schemas import FastTaskResult, FastExecutionResult
 
         exec_result = FastExecutionResult(
             task_results=[
                 FastTaskResult(task_name="setup", outcome="completed",
-                               files_changed=["setup.py"]),
+                               files_changed=["setup.py"], summary="done"),
                 FastTaskResult(task_name="test", outcome="timeout",
-                               error="timed out after 300s"),
+                               error="timed out after 300s", summary=""),
             ],
             completed_count=1,
             failed_count=1,
@@ -449,6 +452,7 @@ class TestVerifierCallArgForwarding:
 
         verify_response = {"passed": False, "summary": "partial", "criteria_results": [], "suggested_fixes": []}
         mock_app = MagicMock()
+        mock_app.NODE_ID = "swe-fast"
         mock_app.app.call = AsyncMock(return_value=verify_response)
 
         with patch.dict("sys.modules", {"swe_af.fast.app": mock_app}):
@@ -465,12 +469,12 @@ class TestVerifierCallArgForwarding:
             ))
 
         call_kwargs = mock_app.app.call.call_args.kwargs
-        forwarded = call_kwargs["task_results"]
-        assert len(forwarded) == 2, "Both task results must be forwarded"
-        assert forwarded[0]["task_name"] == "setup"
-        assert forwarded[1]["outcome"] == "timeout", (
-            "Timeout outcome from executor must reach verifier intact"
-        )
+        completed = call_kwargs["completed_issues"]
+        failed = call_kwargs["failed_issues"]
+        assert len(completed) == 1, "One completed issue expected"
+        assert completed[0]["issue_name"] == "setup"
+        assert len(failed) == 1, "One failed issue expected"
+        assert failed[0]["issue_name"] == "test"
 
 
 # ===========================================================================
@@ -837,10 +841,6 @@ class TestFastPackagePipelineIsolation:
         # Evict pipeline from cache to get a clean check
         sys.modules.pop(pipeline_key, None)
 
-        import swe_af.fast
-        import swe_af.fast.executor
-        import swe_af.fast.planner
-        import swe_af.fast.verifier
 
         assert pipeline_key not in sys.modules, (
             "swe_af.fast (all submodules) must NOT trigger loading "
@@ -927,9 +927,6 @@ class TestFastRouterSharedInstanceAcrossMergedBranches:
 
     def test_all_eight_reasoners_present_on_shared_router(self) -> None:
         """After importing all merged modules, fast_router must have exactly 8 reasoners."""
-        import swe_af.fast
-        import swe_af.fast.planner
-        import swe_af.fast.verifier
         from swe_af.fast import fast_router
 
         registered_names = {r["func"].__name__ for r in fast_router.reasoners}

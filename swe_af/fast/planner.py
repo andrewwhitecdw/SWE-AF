@@ -21,7 +21,7 @@ def _note(msg: str, tags: list[str] | None = None) -> None:
     """Log a message via fast_router.note() when attached, else fall back to logger."""
     try:
         fast_router.note(msg, tags=tags or [])
-    except RuntimeError:
+    except Exception:  # noqa: BLE001
         logger.debug("[fast_planner] %s (tags=%s)", msg, tags)
 
 

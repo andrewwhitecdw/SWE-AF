@@ -276,10 +276,12 @@ class TestFastVerifyEdgeCases:
             result = _run(fast_verify(**kwargs))
 
         assert result["passed"] is True
-        # Verify app.call was invoked with empty task_results
+        # Verify app.call was invoked with empty completed/failed issue lists
         mock_app.call.assert_called_once()
         call_kwargs = mock_app.call.call_args.kwargs
-        assert call_kwargs["task_results"] == []
+        assert call_kwargs["completed_issues"] == []
+        assert call_kwargs["failed_issues"] == []
+        assert call_kwargs["skipped_issues"] == []
 
     def test_empty_task_results_exception_fallback(self) -> None:
         """empty task_results + exception still returns safe fallback."""

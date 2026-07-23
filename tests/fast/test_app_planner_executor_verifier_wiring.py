@@ -33,7 +33,7 @@ import contextlib
 import os
 import sys
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -102,8 +102,8 @@ class TestAppStubState:
 
     def test_app_module_is_importable(self) -> None:
         """swe_af.fast.app must import without error (AC-1)."""
-        import swe_af.fast.app  # noqa: F401, PLC0415
-        assert swe_af.fast.app is not None
+        import swe_af.fast.app as fast_app_module  # noqa: F401, PLC0415
+        assert fast_app_module is not None
 
     def test_app_module_has_app_attribute(self) -> None:
         """swe_af.fast.app must expose an 'app' AgentField node (AC-8).

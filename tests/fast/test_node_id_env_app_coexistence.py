@@ -29,10 +29,14 @@ import asyncio
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+REPO_ROOT = Path(__file__).parent.parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -64,18 +68,16 @@ class TestNodeIdEnvContamination:
     """
 
     def test_node_id_env_set_to_swe_planner_infects_fast_app_node_id(self) -> None:
-        """When NODE_ID=swe-planner in environment, swe_af.fast.app.NODE_ID reads 'swe-planner'.
+        """fast_app.NODE_ID reflects the NODE_ID env var (or its swe-fast default).
 
-        This test documents the real contamination bug: NODE_ID in the environment
-        overrides the swe-fast default in swe_af.fast.app. In production each
-        service must be started with its own NODE_ID set correctly.
+        This test documents that the module-level NODE_ID is read from the
+        environment at import time; when unset it falls back to 'swe-fast'.
+        In production each service must be started with its own NODE_ID set
+        correctly.
         """
-        # Verify the contamination scenario (NODE_ID is set in test environment)
-        current_node_id = os.getenv("NODE_ID", "NOT_SET")
+        current_node_id = os.getenv("NODE_ID", "swe-fast")
         import swe_af.fast.app as fast_app  # noqa: PLC0415
 
-        # The module-level NODE_ID is read at import time from env
-        # If NODE_ID=swe-planner, fast_app.NODE_ID will be 'swe-planner'
         assert fast_app.NODE_ID == current_node_id, (
             f"fast_app.NODE_ID={fast_app.NODE_ID!r} should match env NODE_ID={current_node_id!r}. "
             "This documents the env contamination: fast app respects NODE_ID from environment."
@@ -341,7 +343,7 @@ class TestDockerComposeNodeIdIsolation:
         """docker-compose.yml swe-fast service must have NODE_ID=swe-fast."""
         import yaml  # noqa: PLC0415
 
-        with open("/workspaces/swe-af/docker-compose.yml") as f:
+        with open(REPO_ROOT / "docker-compose.yml") as f:
             dc = yaml.safe_load(f)
 
         assert "swe-fast" in dc["services"], "swe-fast service must exist in docker-compose.yml"
@@ -360,7 +362,7 @@ class TestDockerComposeNodeIdIsolation:
         """docker-compose.yml swe-agent service must have NODE_ID=swe-planner."""
         import yaml  # noqa: PLC0415
 
-        with open("/workspaces/swe-af/docker-compose.yml") as f:
+        with open(REPO_ROOT / "docker-compose.yml") as f:
             dc = yaml.safe_load(f)
 
         svc_name = "swe-agent"
@@ -382,7 +384,7 @@ class TestDockerComposeNodeIdIsolation:
         """swe-fast and swe-planner services must have different NODE_IDs in docker-compose.yml."""
         import yaml  # noqa: PLC0415
 
-        with open("/workspaces/swe-af/docker-compose.yml") as f:
+        with open(REPO_ROOT / "docker-compose.yml") as f:
             dc = yaml.safe_load(f)
 
         services = dc.get("services", {})
@@ -408,7 +410,7 @@ class TestDockerComposeNodeIdIsolation:
         """swe-fast service PORT env must be 8004 (not 8000, the planner's port)."""
         import yaml  # noqa: PLC0415
 
-        with open("/workspaces/swe-af/docker-compose.yml") as f:
+        with open(REPO_ROOT / "docker-compose.yml") as f:
             dc = yaml.safe_load(f)
 
         svc = dc["services"]["swe-fast"]

@@ -19,6 +19,7 @@ services:
       - NODE_ID=swe-planner
       - PORT=8003
       - AGENT_CALLBACK_URL=http://swe-agent:8003
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
     ports:
       - "8003:8003"
     volumes:
@@ -44,6 +45,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
       - OPENCODE_MODEL=${OPENCODE_MODEL:-}
     ports:
       - "8004:8004"

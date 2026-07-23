@@ -266,6 +266,7 @@ class TestExecutorOutputCompatibleWithVerifier:
             "suggested_fixes": [],
         }
         mock_app = MagicMock()
+        mock_app.NODE_ID = "swe-fast"
         mock_app.app.call = AsyncMock(return_value=verify_response)
 
         with patch.dict("sys.modules", {"swe_af.fast.app": mock_app}):
@@ -282,11 +283,14 @@ class TestExecutorOutputCompatibleWithVerifier:
             ))
 
         assert result["passed"] is True
-        # Verify the task_results were forwarded to app.call
+        # Verify the task_results were adapted to completed/failed issue lists
         call_kwargs = mock_app.app.call.call_args.kwargs
-        assert len(call_kwargs["task_results"]) == 2
-        assert call_kwargs["task_results"][0]["task_name"] == "t1"
-        assert call_kwargs["task_results"][1]["outcome"] == "timeout"
+        completed = call_kwargs["completed_issues"]
+        failed = call_kwargs["failed_issues"]
+        assert len(completed) == 1
+        assert completed[0]["issue_name"] == "t1"
+        assert len(failed) == 1
+        assert failed[0]["issue_name"] == "t2"
 
     def test_failed_executor_tasks_visible_to_verifier(self) -> None:
         """Executor 'failed' and 'timeout' outcomes must be visible in verifier task_results."""
@@ -602,10 +606,10 @@ class TestNodeIdConsistency:
 
 
 class TestVerifierForwardsAllKwargsToAppCall:
-    """fast_verify must forward all required parameters to app.call."""
+    """fast_verify must adapt inputs and forward run_verifier kwargs to app.call."""
 
     def test_all_required_params_forwarded_to_app_call(self) -> None:
-        """Every required fast_verify param must appear in the app.call kwargs."""
+        """Every run_verifier param must appear in the app.call kwargs."""
         verify_response = {
             "passed": True,
             "summary": "ok",
@@ -613,6 +617,7 @@ class TestVerifierForwardsAllKwargsToAppCall:
             "suggested_fixes": [],
         }
         mock_app = MagicMock()
+        mock_app.NODE_ID = "swe-fast"
         mock_app.app.call = AsyncMock(return_value=verify_response)
 
         with patch.dict("sys.modules", {"swe_af.fast.app": mock_app}):
@@ -630,17 +635,19 @@ class TestVerifierForwardsAllKwargsToAppCall:
 
         assert mock_app.app.call.called, "app.call must be called"
         call_kwargs = mock_app.app.call.call_args.kwargs
-        required = {"prd", "repo_path", "task_results", "verifier_model",
-                    "permission_mode", "ai_provider", "artifacts_dir"}
+        required = {"prd", "repo_path", "artifacts_dir", "completed_issues",
+                    "failed_issues", "skipped_issues", "model",
+                    "permission_mode", "ai_provider"}
         for key in required:
             assert key in call_kwargs, (
                 f"Verifier must forward '{key}' to app.call — it was missing"
             )
 
-    def test_verifier_passes_run_verifier_as_first_arg(self) -> None:
-        """fast_verify must call app.call with 'run_verifier' as the first positional arg."""
+    def test_verifier_passes_qualified_run_verifier_as_first_arg(self) -> None:
+        """fast_verify must call app.call with '{NODE_ID}.run_verifier' as first arg."""
         verify_response = {"passed": True, "summary": "", "criteria_results": [], "suggested_fixes": []}
         mock_app = MagicMock()
+        mock_app.NODE_ID = "swe-fast"
         mock_app.app.call = AsyncMock(return_value=verify_response)
 
         with patch.dict("sys.modules", {"swe_af.fast.app": mock_app}):
@@ -657,9 +664,8 @@ class TestVerifierForwardsAllKwargsToAppCall:
             ))
 
         call_args = mock_app.app.call.call_args
-        # First positional arg must be 'run_verifier'
-        assert call_args.args[0] == "run_verifier", (
-            f"fast_verify must call app.call with 'run_verifier' as first arg, "
+        assert call_args.args[0] == "swe-fast.run_verifier", (
+            f"fast_verify must call app.call with 'swe-fast.run_verifier' as first arg, "
             f"got {call_args.args[0]!r}"
         )
 

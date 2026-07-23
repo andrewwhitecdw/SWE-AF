@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -11,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Type, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from swe_af.agent_ai.types import (
     AgentResponse,
@@ -23,6 +24,8 @@ from swe_af.agent_ai.types import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 _TRANSIENT_PATTERNS = frozenset(
     {
@@ -84,12 +87,17 @@ def _build_schema_suffix(output_path: str, schema_json: str) -> str:
 
 def _read_and_parse_json_file(path: str, schema: Type[T]) -> T | None:
     """Read a JSON file and parse against schema. Returns None on failure."""
+    text = ""
     try:
         if not os.path.exists(path):
+            logger.debug("Schema output file does not exist: %s", path)
             return None
         with open(path, "r", encoding="utf-8") as f:
             raw = f.read()
         text = raw.strip()
+        if not text:
+            logger.debug("Schema output file is empty: %s", path)
+            return None
         # Strip markdown fences if present
         if text.startswith("```"):
             lines = text.split("\n", 1)
@@ -98,8 +106,28 @@ def _read_and_parse_json_file(path: str, schema: Type[T]) -> T | None:
                 text = text[: -len("```")]
             text = text.strip()
         data = json.loads(text)
+        logger.debug(
+            "Schema output parsed successfully (keys=%s)",
+            list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+        )
         return schema.model_validate(data)
-    except Exception:
+    except FileNotFoundError:
+        logger.debug("Schema output file not found: %s", path)
+        return None
+    except json.JSONDecodeError as e:
+        logger.warning(
+            "JSON decode error parsing schema output: %s | Raw content (first 500 chars): %r",
+            e,
+            text[:500],
+        )
+        return None
+    except ValidationError as e:
+        logger.warning("Pydantic validation error parsing schema output: %s", e)
+        return None
+    except Exception as e:
+        logger.warning(
+            "Unexpected error parsing schema output: %s: %s", type(e).__name__, e
+        )
         return None
 
 
@@ -182,7 +210,9 @@ class OpenCodeProviderClient:
         effective_model = model or cfg.model
         effective_cwd = str(cwd or cfg.cwd)
         effective_turns = max_turns or cfg.max_turns
-        effective_tools = allowed_tools if allowed_tools is not None else list(cfg.allowed_tools)
+        effective_tools = (
+            allowed_tools if allowed_tools is not None else list(cfg.allowed_tools)
+        )
         effective_retries = max_retries if max_retries is not None else cfg.max_retries
         effective_env = {**cfg.env, **(env or {})}
         effective_system = system_prompt or cfg.system_prompt
@@ -302,7 +332,9 @@ class OpenCodeProviderClient:
 
                 # Structured output parsing failed
                 if log_fh:
-                    _write_log(log_fh, "end", is_error=True, reason="schema parse failed")
+                    _write_log(
+                        log_fh, "end", is_error=True, reason="schema parse failed"
+                    )
                 return AgentResponse(
                     result=response.result,
                     parsed=None,
@@ -329,8 +361,12 @@ class OpenCodeProviderClient:
                     if output_schema:
                         output_path = _schema_output_path(effective_cwd)
                         temp_files.append(output_path)
-                        schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
-                        final_prompt = prompt + _build_schema_suffix(output_path, schema_json)
+                        schema_json = json.dumps(
+                            output_schema.model_json_schema(), indent=2
+                        )
+                        final_prompt = prompt + _build_schema_suffix(
+                            output_path, schema_json
+                        )
                     continue
                 # Non-transient error or out of retries
                 if log_fh:
@@ -387,8 +423,21 @@ class OpenCodeProviderClient:
         stdout_text = stdout_b.decode("utf-8", errors="replace")
         stderr_text = stderr_b.decode("utf-8", errors="replace")
 
+        logger.debug(
+            "opencode _execute completed: exit_code=%s, stdout_len=%d, stderr_len=%d, duration_ms=%s",
+            proc.returncode,
+            len(stdout_text),
+            len(stderr_text),
+            duration_ms,
+        )
+        logger.debug("opencode stdout (first 2000 chars): %r", stdout_text[:2000])
+        if stderr_text.strip():
+            logger.debug("opencode stderr (first 2000 chars): %r", stderr_text[:2000])
+
         if proc.returncode != 0:
-            error_msg = f"opencode failed with exit code {proc.returncode}: {stderr_text}"
+            error_msg = (
+                f"opencode failed with exit code {proc.returncode}: {stderr_text}"
+            )
             raise RuntimeError(error_msg)
 
         # Parse output - OpenCode writes response to stdout

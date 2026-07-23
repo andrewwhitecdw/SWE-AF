@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from swe_af.execution.envelope import unwrap_call_result as _unwrap
 from swe_af.fast import fast_router
 from swe_af.fast.schemas import FastVerificationResult
 
@@ -47,7 +48,7 @@ async def fast_verify(
             else:
                 failed_issues.append(entry)
 
-        result: dict[str, Any] = await _app.app.call(
+        raw = await _app.app.call(
             f"{_app.NODE_ID}.run_verifier",
             prd=prd,
             repo_path=repo_path,
@@ -59,6 +60,7 @@ async def fast_verify(
             permission_mode=permission_mode,
             ai_provider=ai_provider,
         )
+        result = _unwrap(raw, f"{_app.NODE_ID}.run_verifier")
         verification = FastVerificationResult(
             passed=result.get("passed", False),
             summary=result.get("summary", ""),
