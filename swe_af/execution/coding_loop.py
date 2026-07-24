@@ -257,6 +257,12 @@ async def _write_memory_on_failure(
         health.setdefault("modules_failing", []).append(issue_name)
     await _memory_set(memory_fn, "build_health", health)
 
+    if note_fn:
+        note_fn(
+            f"Memory: recorded failure patterns for {issue_name}",
+            tags=["memory", "failure", issue_name],
+        )
+
 
 # ---------------------------------------------------------------------------
 # Stuck-loop detection

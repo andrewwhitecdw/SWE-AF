@@ -2,7 +2,12 @@ import asyncio
 import json
 from pathlib import Path
 
-from swe_af.execution.coding_loop import run_coding_loop
+import pytest
+
+from swe_af.execution.coding_loop import (
+    _write_memory_on_failure,
+    run_coding_loop,
+)
 from swe_af.execution.schemas import DAGState, ExecutionConfig, IssueOutcome
 
 
@@ -98,3 +103,31 @@ def test_run_coding_loop_propagates_permission_mode_to_all_agents(tmp_path: Path
     assert result.outcome == IssueOutcome.COMPLETED
     for agent_name in ("run_coder", "run_qa", "run_code_reviewer", "run_qa_synthesizer"):
         assert observed_modes[agent_name] == "bypassPermissions"
+
+
+@pytest.mark.asyncio
+async def test_write_memory_on_failure_emits_note_when_provided() -> None:
+    """_write_memory_on_failure should call note_fn to surface failure-memory writes."""
+    notes = []
+
+    def note_fn(message, tags=None):
+        notes.append((message, tags))
+
+    store = {}
+
+    async def memory_fn(op, key, value=None):
+        if op == "get":
+            return store.get(key)
+        if op == "set":
+            store[key] = value
+
+    await _write_memory_on_failure(
+        memory_fn=memory_fn,
+        issue={"name": "test-issue"},
+        feedback_summary="something went wrong",
+        note_fn=note_fn,
+    )
+
+    assert len(notes) == 1
+    assert "test-issue" in notes[0][0]
+    assert "failure" in notes[0][1]
