@@ -61,8 +61,10 @@ def parse_all():
         with open(lf) as f:
             for line in f:
                 if line.strip():
-                    try: events.append(json.loads(line))
-                    except: pass
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
         if not events:
             continue
 
