@@ -8,7 +8,6 @@ Every chart answers a specific question at a glance.
 
 import json
 import re
-import nbformat
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
@@ -136,6 +135,8 @@ def parse_all():
 # Build notebook
 # ---------------------------------------------------------------------------
 def build_notebook(records):
+    import nbformat  # optional dependency, only needed for notebook generation
+
     nb = nbformat.v4.new_notebook()
     data_json = json.dumps(records, indent=2)
 
