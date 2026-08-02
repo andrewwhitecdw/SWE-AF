@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_analyze_bi():
     spec = importlib.util.spec_from_file_location(
@@ -33,3 +35,22 @@ def test_parse_all_skips_invalid_jsonl_lines(tmp_path, monkeypatch):
 
     assert len(records) == 1
     assert records[0]["model"] == "test"
+
+
+def test_parse_all_propagates_non_json_exceptions(tmp_path, monkeypatch):
+    """Non-JSON exceptions must propagate, not be swallowed by bare except."""
+    module = _load_analyze_bi()
+
+    log_file = tmp_path / "cat-issue-iter1.jsonl"
+    log_file.write_text(
+        json.dumps({"event": "start", "ts": 1.0, "model": "test"}) + "\n"
+    )
+    monkeypatch.setattr(module, "LOG_DIR", tmp_path)
+
+    def raise_value_error(*args, **kwargs):
+        raise ValueError("simulated non-JSON failure")
+
+    monkeypatch.setattr(module.json, "loads", raise_value_error)
+
+    with pytest.raises(ValueError, match="simulated non-JSON failure"):
+        module.parse_all()
