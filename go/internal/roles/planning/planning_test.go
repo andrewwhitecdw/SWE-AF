@@ -54,10 +54,11 @@ func (r *recNote) Note(_ context.Context, message string, tags ...string) {
 // fakePauser returns a scripted ApprovalResult (used for the ask-user loop).
 type fakePauser struct {
 	result *agent.ApprovalResult
+	err    error
 }
 
 func (f *fakePauser) Pause(_ context.Context, _ agent.PauseOptions) (*agent.ApprovalResult, error) {
-	return f.result, nil
+	return f.result, f.err
 }
 
 // haxTestServer returns a *hitl.HaxClient whose CreateRequest hits an httptest
@@ -287,6 +288,96 @@ func TestProductManagerReinvokesOnAskUserForm(t *testing.T) {
 	}
 }
 
+// Contract: when HITL is enabled but the PRD has no ask_user_form, the role
+// completes in a single harness call and does not pause.
+func TestProductManagerNoFormDoesNotPauseWithHax(t *testing.T) {
+	h := &fakeHarness{fn: func(_ int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+		p := dest.(*schemas.PRD)
+		p.ValidatedDescription = "no questions"
+		return &harness.Result{Parsed: dest}, nil
+	}}
+	hax, closeSrv := haxTestServer(t)
+	defer closeSrv()
+	deps, _ := newDeps(h)
+	deps.Hax = hax
+	deps.Pauser = &fakePauser{result: &agent.ApprovalResult{Decision: "approved"}}
+
+	out, err := RunProductManager(context.Background(), deps, map[string]any{"repo_path": t.TempDir()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.calls != 1 {
+		t.Fatalf("expected 1 harness call when no form is emitted, got %d", h.calls)
+	}
+	if m := out.(map[string]any); m["validated_description"] != "no questions" {
+		t.Fatalf("unexpected output: %v", m)
+	}
+}
+
+// Contract: a pauser error during the ask-user loop is surfaced, not swallowed.
+func TestProductManagerPauserErrorPropagates(t *testing.T) {
+	h := &fakeHarness{fn: func(_ int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+		p := dest.(*schemas.PRD)
+		p.AskUserForm = &schemas.AskUserForm{Title: "clarify", SubmitLabel: "Submit"}
+		return &harness.Result{Parsed: dest}, nil
+	}}
+	hax, closeSrv := haxTestServer(t)
+	defer closeSrv()
+	deps, _ := newDeps(h)
+	deps.Hax = hax
+	deps.Pauser = &fakePauser{err: errors.New("pause refused")}
+
+	_, err := RunProductManager(context.Background(), deps, map[string]any{"repo_path": t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "pause refused") {
+		t.Fatalf("expected pauser error to propagate, got %v", err)
+	}
+}
+
+// Contract: a non-approved decision from the user stops the loop with an error.
+func TestProductManagerRejectedDecisionRaises(t *testing.T) {
+	h := &fakeHarness{fn: func(_ int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+		p := dest.(*schemas.PRD)
+		p.AskUserForm = &schemas.AskUserForm{Title: "clarify", SubmitLabel: "Submit"}
+		return &harness.Result{Parsed: dest}, nil
+	}}
+	hax, closeSrv := haxTestServer(t)
+	defer closeSrv()
+	deps, _ := newDeps(h)
+	deps.Hax = hax
+	deps.Pauser = &fakePauser{result: &agent.ApprovalResult{Decision: "rejected"}}
+
+	_, err := RunProductManager(context.Background(), deps, map[string]any{"repo_path": t.TempDir()})
+	if err == nil {
+		t.Fatalf("expected error when user rejects clarification, got nil")
+	}
+}
+
+// Contract: if ask_user_form is still emitted after the re-invoke budget is
+// exhausted, the role returns an error instead of looping forever.
+func TestProductManagerBudgetEnforced(t *testing.T) {
+	h := &fakeHarness{fn: func(_ int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+		p := dest.(*schemas.PRD)
+		p.AskUserForm = &schemas.AskUserForm{Title: "clarify", SubmitLabel: "Submit"}
+		return &harness.Result{Parsed: dest}, nil
+	}}
+	hax, closeSrv := haxTestServer(t)
+	defer closeSrv()
+	deps, _ := newDeps(h)
+	deps.Hax = hax
+	deps.Pauser = &fakePauser{result: &agent.ApprovalResult{
+		Decision:    "approved",
+		RawResponse: map[string]any{"values": map[string]any{"answer": "yes"}},
+	}}
+
+	_, err := RunProductManager(context.Background(), deps, map[string]any{"repo_path": t.TempDir()})
+	if err == nil {
+		t.Fatalf("expected budget-exhausted error, got nil")
+	}
+	if h.calls != 2 {
+		t.Fatalf("expected budget to cap at 2 harness calls, got %d", h.calls)
+	}
+}
+
 // --- run_environment_scout --------------------------------------------------
 
 // Contract: scout return EXCLUDES scoped_credentials, and stores them in the
@@ -366,6 +457,81 @@ func TestScoutFatalPropagates(t *testing.T) {
 	var fe *fatal.FatalHarnessError
 	if !errors.As(err, &fe) {
 		t.Fatalf("expected fatal error to propagate, got %T: %v", err, err)
+	}
+}
+
+// Contract: HITL disabled — an emitted ask_user_form is stripped and the
+// scout completes in a single harness call.
+func TestScoutStripsAskUserFormWhenHaxDisabled(t *testing.T) {
+	h := &fakeHarness{fn: func(_ int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+		s := dest.(*schemas.ScoutResult)
+		s.Summary = "need creds"
+		s.AskUserForm = &schemas.AskUserForm{Title: "creds", SubmitLabel: "Submit"}
+		return &harness.Result{Parsed: dest}, nil
+	}}
+	deps, _ := newDeps(h) // Hax nil
+	out, err := RunEnvironmentScout(context.Background(), deps, map[string]any{"repo_path": t.TempDir()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.calls != 1 {
+		t.Fatalf("expected 1 harness call when HITL disabled, got %d", h.calls)
+	}
+	m := out.(map[string]any)
+	if m["ask_user_form"] != nil {
+		t.Fatalf("expected ask_user_form stripped, got %v", m["ask_user_form"])
+	}
+}
+
+// Contract: HITL-wrapped scout re-invokes on ask_user_form and stashes
+// returned credentials under the run_id.
+func TestScoutReinvokesOnAskUserForm(t *testing.T) {
+	const runID = "scout-run-2"
+	restore := executionContextFrom
+	executionContextFrom = func(context.Context) agent.ExecutionContext {
+		return agent.ExecutionContext{RunID: runID}
+	}
+	defer func() { executionContextFrom = restore }()
+	defer hitl.ClearScopedCredentials(runID)
+
+	h := &fakeHarness{fn: func(call int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+		s := dest.(*schemas.ScoutResult)
+		if call == 1 {
+			s.AskUserForm = &schemas.AskUserForm{Title: "creds", SubmitLabel: "Submit"}
+		} else {
+			s.Summary = "resolved"
+			s.ScopedCredentials = map[string]string{"TOKEN": "tok-456"}
+		}
+		return &harness.Result{Parsed: dest}, nil
+	}}
+	hax, closeSrv := haxTestServer(t)
+	defer closeSrv()
+	deps, _ := newDeps(h)
+	deps.Hax = hax
+	deps.Pauser = &fakePauser{result: &agent.ApprovalResult{
+		Decision:    "approved",
+		RawResponse: map[string]any{"values": map[string]any{"answer": "yes"}},
+	}}
+
+	out, err := RunEnvironmentScout(context.Background(), deps, map[string]any{
+		"prd": map[string]any{"validated_description": "deploy it"}, "repo_path": t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.calls != 2 {
+		t.Fatalf("expected 2 harness calls, got %d", h.calls)
+	}
+	m := out.(map[string]any)
+	if m["summary"] != "resolved" || m["ask_user_form"] != nil {
+		t.Fatalf("expected resolved scout result with cleared form, got %v", m)
+	}
+	if _, present := m["scoped_credentials"]; present {
+		t.Fatalf("scoped_credentials must remain excluded from returned model, got %v", m)
+	}
+	stored := hitl.GetScopedCredentials(runID)
+	if stored["TOKEN"] != "tok-456" {
+		t.Fatalf("expected credentials stashed under run_id, got %v", stored)
 	}
 }
 
