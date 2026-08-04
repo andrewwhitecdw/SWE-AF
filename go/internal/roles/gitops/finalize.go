@@ -40,7 +40,11 @@ func RunRepoFinalize(ctx context.Context, deps *Deps, input map[string]any) (any
 	if err != nil {
 		return nil, err
 	}
-	opts := roleOptions(provider, orDefault(in.Model, "sonnet"), gitprompts.RepoFinalizeSystemPrompt, in.RepoPath,
+	model, err := resolveModel(in.Model, "git")
+	if err != nil {
+		return nil, err
+	}
+	opts := roleOptions(provider, model, gitprompts.RepoFinalizeSystemPrompt, in.RepoPath,
 		[]string{"Bash", "Read", "Write", "Glob", "Grep"}, in.PermissionMode)
 
 	val, ok, err := runRole[schemas.RepoFinalizeResult](ctx, deps, taskPrompt, opts, "repo_finalize", "Repo finalize agent failed")
@@ -54,8 +58,9 @@ func RunRepoFinalize(ctx context.Context, deps *Deps, input map[string]any) (any
 	}
 
 	return schemas.RepoFinalizeResult{
-		Success: false,
-		Summary: "Repo finalize agent failed to produce a valid result.",
+		Success:      false,
+		Summary:      "Repo finalize agent failed to produce a valid result.",
+		FilesRemoved: []string{},
 	}, nil
 }
 
@@ -104,7 +109,11 @@ func RunGitHubPR(ctx context.Context, deps *Deps, input map[string]any) (any, er
 	if err != nil {
 		return nil, err
 	}
-	opts := roleOptions(provider, orDefault(in.Model, "sonnet"), gitprompts.GitHubPRSystemPrompt, in.RepoPath,
+	model, err := resolveModel(in.Model, "git")
+	if err != nil {
+		return nil, err
+	}
+	opts := roleOptions(provider, model, gitprompts.GitHubPRSystemPrompt, in.RepoPath,
 		[]string{"Bash", "Write"}, in.PermissionMode)
 
 	val, ok, err := runRole[schemas.GitHubPRResult](ctx, deps, taskPrompt, opts, "github_pr", "GitHub PR agent failed")
