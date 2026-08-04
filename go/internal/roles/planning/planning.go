@@ -56,6 +56,15 @@ type Deps struct {
 	AgentFieldServer string
 }
 
+// prompt-builder seams let tests inject failures for the constructors that
+// return (systemPrompt, error). The handlers previously ignored that error.
+var (
+	productManagerPromptsFn = prompts.ProductManagerPrompts
+	architectPromptsFn      = prompts.ArchitectPrompts
+	techLeadPromptsFn       = prompts.TechLeadPrompts
+	sprintPlannerPromptsFn  = prompts.SprintPlannerPrompts
+)
+
 // executionContextFrom is a seam over agent.ExecutionContextFrom so tests can
 // inject a run_id / execution_id (the SDK's context key is unexported, so an
 // external test cannot seed an ExecutionContext into a ctx directly).
@@ -85,10 +94,10 @@ func RunProductManager(ctx context.Context, deps *Deps, input map[string]any) (a
 	repoPath := getString(input, "repo_path", "")
 	artifactsDir := getString(input, "artifacts_dir", ".artifacts")
 	additionalContext := getString(input, "additional_context", "")
-	model := getString(input, "model", "sonnet")
+	model := orResolvedDefault(getString(input, "model", ""), config.DefaultPlanningModel())
 	maxTurns := getInt(input, "max_turns", config.DefaultAgentMaxTurns)
 	permissionMode := getString(input, "permission_mode", "")
-	aiProvider := getString(input, "ai_provider", "claude")
+	aiProvider := orResolvedDefault(getString(input, "ai_provider", ""), config.DefaultRuntime())
 	initialPrior := getPriorResponses(input)
 
 	_, paths, err := ensurePaths(repoPath, artifactsDir)
@@ -101,13 +110,16 @@ func RunProductManager(ctx context.Context, deps *Deps, input map[string]any) (a
 		return nil, err
 	}
 
-	systemPrompt, _ := prompts.ProductManagerPrompts(prompts.ProductManagerPromptsOpts{
+	systemPrompt, err := productManagerPromptsFn(prompts.ProductManagerPromptsOpts{
 		Goal:               goal,
 		RepoPath:           repoPath,
 		PRDPath:            paths["prd"],
 		AdditionalContext:  additionalContext,
 		PriorUserResponses: initialPrior,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	provider, err := runtimex.RuntimeToHarnessAdapter(aiProvider)
 	if err != nil {
@@ -183,10 +195,10 @@ func RunEnvironmentScout(ctx context.Context, deps *Deps, input map[string]any) 
 	prd := getMap(input, "prd")
 	repoPath := getString(input, "repo_path", "")
 	artifactsDir := getString(input, "artifacts_dir", ".artifacts")
-	model := getString(input, "model", "sonnet")
+	model := orResolvedDefault(getString(input, "model", ""), config.DefaultPlanningModel())
 	maxTurns := getInt(input, "max_turns", config.DefaultAgentMaxTurns)
 	permissionMode := getString(input, "permission_mode", "")
-	aiProvider := getString(input, "ai_provider", "claude")
+	aiProvider := orResolvedDefault(getString(input, "ai_provider", ""), config.DefaultRuntime())
 	initialPrior := getPriorResponses(input)
 
 	// Ensure the artifact dirs exist; the scout writes no artifacts of its own.
@@ -302,10 +314,10 @@ func RunArchitect(ctx context.Context, deps *Deps, input map[string]any) (any, e
 	repoPath := getString(input, "repo_path", "")
 	artifactsDir := getString(input, "artifacts_dir", ".artifacts")
 	feedback := getString(input, "feedback", "")
-	model := getString(input, "model", "sonnet")
+	model := orResolvedDefault(getString(input, "model", ""), config.DefaultPlanningModel())
 	maxTurns := getInt(input, "max_turns", config.DefaultAgentMaxTurns)
 	permissionMode := getString(input, "permission_mode", "")
-	aiProvider := getString(input, "ai_provider", "claude")
+	aiProvider := orResolvedDefault(getString(input, "ai_provider", ""), config.DefaultRuntime())
 
 	_, paths, err := ensurePaths(repoPath, artifactsDir)
 	if err != nil {
@@ -321,13 +333,16 @@ func RunArchitect(ctx context.Context, deps *Deps, input map[string]any) (any, e
 		return nil, err
 	}
 
-	systemPrompt, _ := prompts.ArchitectPrompts(prompts.ArchitectPromptsOpts{
+	systemPrompt, err := architectPromptsFn(prompts.ArchitectPromptsOpts{
 		PRD:              prdObj,
 		RepoPath:         repoPath,
 		PRDPath:          paths["prd"],
 		ArchitecturePath: paths["architecture"],
 		Feedback:         feedback,
 	})
+	if err != nil {
+		return nil, err
+	}
 	taskPrompt := prompts.ArchitectTaskPrompt(prompts.ArchitectTaskPromptOpts{
 		PRD:               prdObj,
 		RepoPath:          repoPath,
@@ -374,10 +389,10 @@ func RunTechLead(ctx context.Context, deps *Deps, input map[string]any) (any, er
 	repoPath := getString(input, "repo_path", "")
 	artifactsDir := getString(input, "artifacts_dir", ".artifacts")
 	revisionNumber := getInt(input, "revision_number", 0)
-	model := getString(input, "model", "sonnet")
+	model := orResolvedDefault(getString(input, "model", ""), config.DefaultPlanningModel())
 	maxTurns := getInt(input, "max_turns", config.DefaultAgentMaxTurns)
 	permissionMode := getString(input, "permission_mode", "")
-	aiProvider := getString(input, "ai_provider", "claude")
+	aiProvider := orResolvedDefault(getString(input, "ai_provider", ""), config.DefaultRuntime())
 
 	base, paths, err := ensurePaths(repoPath, artifactsDir)
 	if err != nil {
@@ -389,11 +404,14 @@ func RunTechLead(ctx context.Context, deps *Deps, input map[string]any) (any, er
 		return nil, err
 	}
 
-	systemPrompt, _ := prompts.TechLeadPrompts(prompts.TechLeadPromptsOpts{
+	systemPrompt, err := techLeadPromptsFn(prompts.TechLeadPromptsOpts{
 		PRDPath:          paths["prd"],
 		ArchitecturePath: paths["architecture"],
 		RevisionNumber:   revisionNumber,
 	})
+	if err != nil {
+		return nil, err
+	}
 	taskPrompt := prompts.TechLeadTaskPrompt(prompts.TechLeadTaskPromptOpts{
 		PRDPath:           paths["prd"],
 		ArchitecturePath:  paths["architecture"],
@@ -460,10 +478,10 @@ func RunSprintPlanner(ctx context.Context, deps *Deps, input map[string]any) (an
 
 	repoPath := getString(input, "repo_path", "")
 	artifactsDir := getString(input, "artifacts_dir", ".artifacts")
-	model := getString(input, "model", "sonnet")
+	model := orResolvedDefault(getString(input, "model", ""), config.DefaultPlanningModel())
 	maxTurns := getInt(input, "max_turns", config.DefaultAgentMaxTurns)
 	permissionMode := getString(input, "permission_mode", "")
-	aiProvider := getString(input, "ai_provider", "claude")
+	aiProvider := orResolvedDefault(getString(input, "ai_provider", ""), config.DefaultRuntime())
 
 	_, paths, err := ensurePaths(repoPath, artifactsDir)
 	if err != nil {
@@ -483,13 +501,16 @@ func RunSprintPlanner(ctx context.Context, deps *Deps, input map[string]any) (an
 		return nil, err
 	}
 
-	systemPrompt, _ := prompts.SprintPlannerPrompts(prompts.SprintPlannerPromptsOpts{
+	systemPrompt, err := sprintPlannerPromptsFn(prompts.SprintPlannerPromptsOpts{
 		PRD:              prdObj,
 		Architecture:     archObj,
 		RepoPath:         repoPath,
 		PRDPath:          paths["prd"],
 		ArchitecturePath: paths["architecture"],
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	prdMap, err := toMap(&prdObj)
 	if err != nil {
@@ -637,6 +658,13 @@ func getString(input map[string]any, key, def string) string {
 		}
 	}
 	return def
+}
+
+func orResolvedDefault(value, def string) string {
+	if value == "" {
+		return def
+	}
+	return value
 }
 
 // getInt returns input[key] as an int when present, else def. Tolerates the
