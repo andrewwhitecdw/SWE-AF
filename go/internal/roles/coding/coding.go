@@ -370,9 +370,13 @@ func RunCodeReviewer(ctx context.Context, deps *Deps, input map[string]any) (any
 		return parsed, nil
 	}
 
+	summary := fmt.Sprintf("Code reviewer agent failed for %s — not blocking", issueName)
+	if hErr != nil {
+		summary += ": " + hErr.Error()
+	}
 	return &schemas.CodeReviewResult{
 		Approved:    true, // don't block on reviewer failure
-		Summary:     fmt.Sprintf("Code reviewer agent failed for %s — not blocking", issueName),
+		Summary:     summary,
 		Blocking:    false,
 		DebtItems:   []map[string]any{},
 		IterationID: in.IterationID,
