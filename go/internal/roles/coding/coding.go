@@ -277,9 +277,13 @@ func RunQA(ctx context.Context, deps *Deps, input map[string]any) (any, error) {
 		return parsed, nil
 	}
 
+	summary := fmt.Sprintf("QA agent failed for %s", issueName)
+	if hErr != nil {
+		summary += ": " + hErr.Error()
+	}
 	return &schemas.QAResult{
 		Passed:       false,
-		Summary:      fmt.Sprintf("QA agent failed for %s", issueName),
+		Summary:      summary,
 		TestFailures: []map[string]any{},
 		CoverageGaps: []string{},
 		IterationID:  in.IterationID,
