@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -103,7 +104,26 @@ func sortedSet(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
+}
+
+func TestSortedSetReturnsSortedKeys(t *testing.T) {
+	in := map[string]bool{
+		"charlie": true, "alpha": true, "bravo": true, "delta": true,
+		"echo": true, "foxtrot": true, "golf": true, "hotel": true,
+		"india": true, "juliett": true,
+	}
+	got := sortedSet(in)
+	want := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliett"}
+	if len(got) != len(want) {
+		t.Fatalf("length mismatch: got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("sortedSet returned unsorted keys: got %v, want %v", got, want)
+		}
+	}
 }
 
 // --- run_product_manager ----------------------------------------------------
