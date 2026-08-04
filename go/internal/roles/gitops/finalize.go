@@ -58,8 +58,9 @@ func RunRepoFinalize(ctx context.Context, deps *Deps, input map[string]any) (any
 	}
 
 	return schemas.RepoFinalizeResult{
-		Success: false,
-		Summary: "Repo finalize agent failed to produce a valid result.",
+		Success:      false,
+		Summary:      "Repo finalize agent failed to produce a valid result.",
+		FilesRemoved: []string{},
 	}, nil
 }
 
