@@ -9,9 +9,8 @@
 // so the wiring task (T6.2) can register it under the exact Python reasoner name
 // via Handlers(). The handlers mirror the Python functions 1:1:
 //
-//   - inputs are bound from the untyped map with the SAME parameter names and
-//     defaults as the Python function signatures (model="sonnet"/"haiku",
-//     ai_provider="claude", iteration=1, qa_ran=false, …);
+//   - inputs are bound from the untyped map with the same parameter names as
+//     Python; absent runtime/model values resolve from config at call time;
 //   - run_coder/run_qa/run_code_reviewer call the structured-output harness via
 //     harnessx.Run; run_qa_synthesizer uses the direct-LLM path (Deps.AI), the
 //     Go equivalent of Python's router.ai (NOT the coding harness);
@@ -112,12 +111,13 @@ type coderInput struct {
 	TargetRepo        string         `json:"target_repo"`
 }
 
-// UnmarshalJSON seeds the Python parameter defaults (iteration=1, model="sonnet",
-// ai_provider="claude") so keys absent from the input map keep those defaults.
 func (c *coderInput) UnmarshalJSON(b []byte) error {
-	*c = coderInput{Iteration: 1, Model: "sonnet", AIProvider: "claude"}
+	*c = coderInput{Iteration: 1}
 	type alias coderInput
-	return jsonUnmarshal(b, (*alias)(c))
+	if err := jsonUnmarshal(b, (*alias)(c)); err != nil {
+		return err
+	}
+	return resolveRoleDefaults(&c.AIProvider, &c.Model, "coder")
 }
 
 // RunCoder ports run_coder (execution_agents.py:963). Implements an issue and
@@ -216,12 +216,14 @@ type qaInput struct {
 	TargetRepo        string         `json:"target_repo"`
 }
 
-// UnmarshalJSON seeds the Python parameter defaults (model="sonnet",
-// ai_provider="claude").
+// UnmarshalJSON applies configured runtime/model defaults at call time.
 func (q *qaInput) UnmarshalJSON(b []byte) error {
-	*q = qaInput{Model: "sonnet", AIProvider: "claude"}
+	*q = qaInput{}
 	type alias qaInput
-	return jsonUnmarshal(b, (*alias)(q))
+	if err := jsonUnmarshal(b, (*alias)(q)); err != nil {
+		return err
+	}
+	return resolveRoleDefaults(&q.AIProvider, &q.Model, "qa")
 }
 
 // RunQA ports run_qa (execution_agents.py:1060). Reviews/augments tests and runs
@@ -262,22 +264,36 @@ func RunQA(ctx context.Context, deps *Deps, input map[string]any) (any, error) {
 		Cwd:            in.WorktreePath,
 	}.ToOptions()
 
+	harnessError := ""
 	parsed, result, hErr := harnessx.Run[schemas.QAResult](ctx, deps.Harness, taskPrompt, opts)
 	switch {
 	case hErr != nil:
 		if isFatal(hErr) {
 			return nil, hErr
 		}
-		deps.Note.Note(ctx, fmt.Sprintf("QA agent failed: %s: %s", issueName, hErr.Error()), "qa", "error")
+		harnessError = hErr.Error()
+		deps.Note.Note(ctx, fmt.Sprintf("QA agent failed: %s: %s", issueName, harnessError), "qa", "error")
 	case result != nil && result.Parsed != nil:
 		deps.Note.Note(ctx, fmt.Sprintf("QA complete: %s, passed=%s", issueName, pyBool(parsed.Passed)), "qa", "complete")
 		parsed.IterationID = in.IterationID
 		return parsed, nil
+	default:
+		if result != nil {
+			harnessError = result.ErrorMessage
+		}
+		if harnessError == "" {
+			harnessError = "no structured output returned"
+		}
+		deps.Note.Note(ctx, fmt.Sprintf("QA produced no result: %s: %s", issueName, harnessError), "qa", "error")
 	}
 
+	summary := fmt.Sprintf("QA agent failed for %s", issueName)
+	if harnessError != "" {
+		summary += ": " + harnessError
+	}
 	return &schemas.QAResult{
 		Passed:       false,
-		Summary:      fmt.Sprintf("QA agent failed for %s", issueName),
+		Summary:      summary,
 		TestFailures: []map[string]any{},
 		CoverageGaps: []string{},
 		IterationID:  in.IterationID,
@@ -304,11 +320,14 @@ type codeReviewerInput struct {
 }
 
 // UnmarshalJSON seeds the Python parameter defaults (qa_ran=false is the Go zero
-// value; model="sonnet", ai_provider="claude").
+// value; runtime/model defaults are resolved at call time).
 func (c *codeReviewerInput) UnmarshalJSON(b []byte) error {
-	*c = codeReviewerInput{Model: "sonnet", AIProvider: "claude"}
+	*c = codeReviewerInput{}
 	type alias codeReviewerInput
-	return jsonUnmarshal(b, (*alias)(c))
+	if err := jsonUnmarshal(b, (*alias)(c)); err != nil {
+		return err
+	}
+	return resolveRoleDefaults(&c.AIProvider, &c.Model, "code_reviewer")
 }
 
 // RunCodeReviewer ports run_code_reviewer (execution_agents.py:1134). Reviews
@@ -351,23 +370,37 @@ func RunCodeReviewer(ctx context.Context, deps *Deps, input map[string]any) (any
 		Cwd:            in.WorktreePath,
 	}.ToOptions()
 
+	harnessError := ""
 	parsed, result, hErr := harnessx.Run[schemas.CodeReviewResult](ctx, deps.Harness, taskPrompt, opts)
 	switch {
 	case hErr != nil:
 		if isFatal(hErr) {
 			return nil, hErr
 		}
-		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer agent failed: %s: %s", issueName, hErr.Error()), "code_reviewer", "error")
+		harnessError = hErr.Error()
+		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer agent failed: %s: %s", issueName, harnessError), "code_reviewer", "error")
 	case result != nil && result.Parsed != nil:
 		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer complete: %s, approved=%s, blocking=%s",
 			issueName, pyBool(parsed.Approved), pyBool(parsed.Blocking)), "code_reviewer", "complete")
 		parsed.IterationID = in.IterationID
 		return parsed, nil
+	default:
+		if result != nil {
+			harnessError = result.ErrorMessage
+		}
+		if harnessError == "" {
+			harnessError = "no structured output returned"
+		}
+		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer produced no result: %s: %s", issueName, harnessError), "code_reviewer", "error")
 	}
 
+	summary := fmt.Sprintf("Code reviewer agent failed for %s — not blocking", issueName)
+	if harnessError != "" {
+		summary += ": " + harnessError
+	}
 	return &schemas.CodeReviewResult{
 		Approved:    true, // don't block on reviewer failure
-		Summary:     fmt.Sprintf("Code reviewer agent failed for %s — not blocking", issueName),
+		Summary:     summary,
 		Blocking:    false,
 		DebtItems:   []map[string]any{},
 		IterationID: in.IterationID,
@@ -393,12 +426,28 @@ type qaSynthInput struct {
 	TargetRepo        string           `json:"target_repo"`
 }
 
-// UnmarshalJSON seeds the Python parameter defaults (model="haiku",
-// ai_provider="claude").
+// UnmarshalJSON applies configured runtime/model defaults at call time.
 func (q *qaSynthInput) UnmarshalJSON(b []byte) error {
-	*q = qaSynthInput{Model: "haiku", AIProvider: "claude"}
+	*q = qaSynthInput{}
 	type alias qaSynthInput
-	return jsonUnmarshal(b, (*alias)(q))
+	if err := jsonUnmarshal(b, (*alias)(q)); err != nil {
+		return err
+	}
+	return resolveRoleDefaults(&q.AIProvider, &q.Model, "qa_synthesizer")
+}
+
+func resolveRoleDefaults(aiProvider, model *string, role string) error {
+	if *aiProvider == "" {
+		*aiProvider = config.DefaultRuntime()
+	}
+	if *model == "" {
+		resolved, err := config.DefaultRoleModel(role)
+		if err != nil {
+			return err
+		}
+		*model = resolved
+	}
+	return nil
 }
 
 // RunQASynthesizer ports run_qa_synthesizer (execution_agents.py:1216). Merges
