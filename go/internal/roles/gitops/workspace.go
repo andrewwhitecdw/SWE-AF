@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/Agent-Field/SWE-AF/go/internal/afx"
@@ -75,18 +76,26 @@ func RunGitInit(ctx context.Context, deps *Deps, input map[string]any) (any, err
 	if ok {
 		deps.App.Note(ctx, fmt.Sprintf("Git init complete: mode=%s, integration_branch=%s",
 			val.Mode, val.IntegrationBranch), "git_init", "complete")
-		return *val, nil
+		out, err := toMap(val)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 
 	// Fallback: report failure.
-	return schemas.GitInitResult{
+	out, err := toMap(&schemas.GitInitResult{
 		Mode:              "unknown",
 		OriginalBranch:    "",
 		IntegrationBranch: "",
 		InitialCommitSHA:  "",
 		Success:           false,
 		ErrorMessage:      "Git init agent failed to produce a valid result.",
-	}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -157,10 +166,18 @@ func RunWorkspaceSetup(ctx context.Context, deps *Deps, input map[string]any) (a
 	if ok {
 		deps.App.Note(ctx, fmt.Sprintf("Workspace setup complete: %d worktrees created",
 			len(val.Workspaces)), "workspace_setup", "complete")
-		return *val, nil
+		out, err := toMap(val)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 
-	return workspaceSetupResult{Workspaces: []schemas.WorkspaceInfo{}, Success: false}, nil
+	out, err := toMap(&workspaceSetupResult{Workspaces: []schemas.WorkspaceInfo{}, Success: false})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -222,8 +239,34 @@ func RunWorkspaceCleanup(ctx context.Context, deps *Deps, input map[string]any) 
 	if ok {
 		deps.App.Note(ctx, fmt.Sprintf("Workspace cleanup complete: %d cleaned",
 			len(val.Cleaned)), "workspace_cleanup", "complete")
-		return *val, nil
+		out, err := toMap(val)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 
-	return workspaceCleanupResult{Success: false, Cleaned: []string{}}, nil
+	out, err := toMap(&workspaceCleanupResult{Success: false, Cleaned: []string{}})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// toMap serializes a typed result into a JSON-tagged map[string]any so role
+// handlers return dict-shaped payloads consistent with the planning package.
+func toMap(v any) (map[string]any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
