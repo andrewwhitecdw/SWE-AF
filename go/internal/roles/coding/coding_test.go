@@ -112,9 +112,11 @@ func keySet(m map[string]any) []string {
 
 func assertKeys(t *testing.T, got map[string]any, want []string) {
 	t.Helper()
-	sort.Strings(want)
+	wantCopy := make([]string, len(want))
+	copy(wantCopy, want)
+	sort.Strings(wantCopy)
 	gk := keySet(got)
-	if strings.Join(gk, ",") != strings.Join(want, ",") {
+	if strings.Join(gk, ",") != strings.Join(wantCopy, ",") {
 		t.Fatalf("key set mismatch:\n got: %v\nwant: %v", gk, want)
 	}
 }
