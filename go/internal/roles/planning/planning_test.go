@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -103,7 +104,26 @@ func sortedSet(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
+}
+
+func TestSortedSetReturnsSortedKeys(t *testing.T) {
+	in := map[string]bool{
+		"charlie": true, "alpha": true, "bravo": true, "delta": true,
+		"echo": true, "foxtrot": true, "golf": true, "hotel": true,
+		"india": true, "juliett": true,
+	}
+	got := sortedSet(in)
+	want := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliett"}
+	if len(got) != len(want) {
+		t.Fatalf("length mismatch: got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("sortedSet returned unsorted keys: got %v, want %v", got, want)
+		}
+	}
 }
 
 // --- run_product_manager ----------------------------------------------------
@@ -154,6 +174,51 @@ func TestProductManagerHarnessOptions(t *testing.T) {
 	if h.lastOpts.Model != "sonnet" || h.lastOpts.MaxTurns != 150 {
 		t.Fatalf("unexpected model/max_turns: %q/%d", h.lastOpts.Model, h.lastOpts.MaxTurns)
 	}
+}
+
+func TestProductManagerDirectCallRuntimeDefaults(t *testing.T) {
+	clearRuntimeEnv := func(t *testing.T) {
+		t.Helper()
+		for _, key := range []string{"ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "SWE_DEFAULT_RUNTIME", "SWE_MODEL_HIGH", "SWE_DEFAULT_MODEL", "AI_MODEL", "HARNESS_MODEL"} {
+			t.Setenv(key, "")
+		}
+	}
+	run := func(t *testing.T, input map[string]any) harness.Options {
+		t.Helper()
+		h := &fakeHarness{fn: func(_ int, _ string, dest any, _ harness.Options) (*harness.Result, error) {
+			return &harness.Result{Parsed: dest}, nil
+		}}
+		deps, _ := newDeps(h)
+		input["repo_path"] = t.TempDir()
+		if _, err := RunProductManager(context.Background(), deps, input); err != nil {
+			t.Fatalf("RunProductManager: %v", err)
+		}
+		return h.lastOpts
+	}
+
+	t.Run("OpenRouter only", func(t *testing.T) {
+		clearRuntimeEnv(t)
+		t.Setenv("OPENROUTER_API_KEY", "test-key")
+		opts := run(t, map[string]any{})
+		if opts.Provider != "opencode" || opts.Model != "openrouter/deepseek/deepseek-v4-flash" {
+			t.Fatalf("defaults = provider %q, model %q", opts.Provider, opts.Model)
+		}
+	})
+	t.Run("configured codex", func(t *testing.T) {
+		clearRuntimeEnv(t)
+		t.Setenv("SWE_DEFAULT_RUNTIME", "codex")
+		if got := run(t, map[string]any{}).Provider; got != "codex" {
+			t.Fatalf("provider = %q, want codex", got)
+		}
+	})
+	t.Run("explicit values win", func(t *testing.T) {
+		clearRuntimeEnv(t)
+		t.Setenv("OPENROUTER_API_KEY", "test-key")
+		opts := run(t, map[string]any{"ai_provider": "claude", "model": "sonnet"})
+		if opts.Provider != "claude-code" || opts.Model != "sonnet" {
+			t.Fatalf("explicit = provider %q, model %q", opts.Provider, opts.Model)
+		}
+	})
 }
 
 // Contract: parse failure raises (not a fallback).
