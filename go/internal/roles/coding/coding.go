@@ -264,22 +264,36 @@ func RunQA(ctx context.Context, deps *Deps, input map[string]any) (any, error) {
 		Cwd:            in.WorktreePath,
 	}.ToOptions()
 
+	harnessError := ""
 	parsed, result, hErr := harnessx.Run[schemas.QAResult](ctx, deps.Harness, taskPrompt, opts)
 	switch {
 	case hErr != nil:
 		if isFatal(hErr) {
 			return nil, hErr
 		}
-		deps.Note.Note(ctx, fmt.Sprintf("QA agent failed: %s: %s", issueName, hErr.Error()), "qa", "error")
+		harnessError = hErr.Error()
+		deps.Note.Note(ctx, fmt.Sprintf("QA agent failed: %s: %s", issueName, harnessError), "qa", "error")
 	case result != nil && result.Parsed != nil:
 		deps.Note.Note(ctx, fmt.Sprintf("QA complete: %s, passed=%s", issueName, pyBool(parsed.Passed)), "qa", "complete")
 		parsed.IterationID = in.IterationID
 		return parsed, nil
+	default:
+		if result != nil {
+			harnessError = result.ErrorMessage
+		}
+		if harnessError == "" {
+			harnessError = "no structured output returned"
+		}
+		deps.Note.Note(ctx, fmt.Sprintf("QA produced no result: %s: %s", issueName, harnessError), "qa", "error")
 	}
 
+	summary := fmt.Sprintf("QA agent failed for %s", issueName)
+	if harnessError != "" {
+		summary += ": " + harnessError
+	}
 	return &schemas.QAResult{
 		Passed:       false,
-		Summary:      fmt.Sprintf("QA agent failed for %s", issueName),
+		Summary:      summary,
 		TestFailures: []map[string]any{},
 		CoverageGaps: []string{},
 		IterationID:  in.IterationID,
@@ -356,23 +370,37 @@ func RunCodeReviewer(ctx context.Context, deps *Deps, input map[string]any) (any
 		Cwd:            in.WorktreePath,
 	}.ToOptions()
 
+	harnessError := ""
 	parsed, result, hErr := harnessx.Run[schemas.CodeReviewResult](ctx, deps.Harness, taskPrompt, opts)
 	switch {
 	case hErr != nil:
 		if isFatal(hErr) {
 			return nil, hErr
 		}
-		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer agent failed: %s: %s", issueName, hErr.Error()), "code_reviewer", "error")
+		harnessError = hErr.Error()
+		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer agent failed: %s: %s", issueName, harnessError), "code_reviewer", "error")
 	case result != nil && result.Parsed != nil:
 		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer complete: %s, approved=%s, blocking=%s",
 			issueName, pyBool(parsed.Approved), pyBool(parsed.Blocking)), "code_reviewer", "complete")
 		parsed.IterationID = in.IterationID
 		return parsed, nil
+	default:
+		if result != nil {
+			harnessError = result.ErrorMessage
+		}
+		if harnessError == "" {
+			harnessError = "no structured output returned"
+		}
+		deps.Note.Note(ctx, fmt.Sprintf("Code reviewer produced no result: %s: %s", issueName, harnessError), "code_reviewer", "error")
 	}
 
+	summary := fmt.Sprintf("Code reviewer agent failed for %s — not blocking", issueName)
+	if harnessError != "" {
+		summary += ": " + harnessError
+	}
 	return &schemas.CodeReviewResult{
 		Approved:    true, // don't block on reviewer failure
-		Summary:     fmt.Sprintf("Code reviewer agent failed for %s — not blocking", issueName),
+		Summary:     summary,
 		Blocking:    false,
 		DebtItems:   []map[string]any{},
 		IterationID: in.IterationID,
